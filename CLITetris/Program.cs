@@ -24,25 +24,28 @@ internal static partial class Program
     private const int BoardHeight = 20;
     private const string LineEnd = "[0m\n";
 
-    private static readonly Blocks[,] Board = new Blocks[BoardWidth, BoardHeight];
+    private static readonly Block[,] Board = new Block[BoardWidth, BoardHeight];
 
     private static (int X, int Y)[] _occupiedBlocks = new (int X, int Y)[4];
 
     private static readonly (int X, int Y) ResetPosition = (4, 0);
 
-    private static Blocks _heldBlock;
-    private static Blocks _currentBlock;
+    private static Block _heldBlock;
+    private static Block _currentBlock;
     private static Rotation _currentRotation = Rotation.Up;
     private static int _score;
+    private static int _linesCleared;
     private static int _level = 1;
     private static int _lagCounter;
     private static bool _playerIsAlive = true;
     private static ConsoleKeyInfo _bufferedInput;
     private static (int X, int Y) _position = ResetPosition;
     private static double _timer;
+    private static double _groundedTimer;
+    private static bool _grounded;
 
-    private static readonly List<Blocks> Bag = new();
-    private static readonly List<Blocks> NextBag = new();
+    private static readonly List<Block> Bag = new();
+    private static readonly List<Block> NextBag = new();
 
     private static readonly Random Random = new();
 
@@ -65,10 +68,10 @@ internal static partial class Program
         Console.SetCursorPosition(0, 0);
         Stopwatch s = new();
 
-        Bag.AddRange(Enum.GetValues<Blocks>()[1..8]);
+        Bag.AddRange(Enum.GetValues<Block>()[1..8]);
         Bag.Shuffle();
         _currentBlock = Bag[0];
-        NextBag.AddRange(Enum.GetValues<Blocks>()[1..8]);
+        NextBag.AddRange(Enum.GetValues<Block>()[1..8]);
         NextBag.Shuffle();
 
         while (true)
@@ -81,14 +84,24 @@ internal static partial class Program
                 if (Console.KeyAvailable)
                     _bufferedInput = Console.ReadKey(true);
 
-                UpdateBoard();
+                try
+                {
+                    UpdateBoard();
+                }
+                catch
+                {
+                    QueueNextBlock();
+                }
+
                 RenderBoard();
 
                 _bufferedInput = default;
                 s.Stop();
                 _lagCounter = (int)s.ElapsedMilliseconds;
                 s.Reset();
-                _timer += (int)Math.Pow(_level, 3) / 2000d;
+                double delta = Math.Pow(_level, 3) / 2000d;
+                _timer += delta;
+                _groundedTimer += Math.Min(delta, 0.032); // The block should take 1 second minimum to lock in place
                 Thread.Sleep(Math.Max(0, 16 - _lagCounter)); // 62.5 fps
             }
 
@@ -110,13 +123,17 @@ internal static partial class Program
         for (int y = 0; y < BoardHeight; y++)
         {
             for (int x = 0; x < BoardWidth; x++)
+            {
                 board.Append(BlockColors[(int)Board[x, y]]);
+                if (Board[x, y] == Block.Ghost)
+                    Board[x, y] = Block.Empty;
+            }
 
             board.Append(LineEnd);
         }
 
         string infoText =
-            $"<<Next: {Bag[1]} | Held: {_heldBlock} | Score: {_score} | Lag: {_lagCounter}ms | Level: {_level} | Timer: {_timer} | X: {_position.X}>>";
+            $"<<Next: {Bag[1]}, {Bag[2]}, {Bag[3]} | Held: {_heldBlock} | Score: {_score} | Lag: {_lagCounter}ms | Level: {_level} | Timer: {_timer} | Lines: {_linesCleared} | GroundedTimer: {_groundedTimer}>>";
         infoText = infoText.PadLeft(infoText.Length + (BoardWidth - infoText.Length) / 2);
         Console.SetCursorPosition(0, 0);
         board.Append(infoText);
@@ -125,20 +142,64 @@ internal static partial class Program
 
     private static void UpdateBoard()
     {
+        
         for (int i = 0; i < 4; i++)
         {
             _occupiedBlocks[i] = (X: _position.X + BlockData[(int)_currentBlock][(int)_currentRotation][i].X,
                 Y: _position.Y + BlockData[(int)_currentBlock][(int)_currentRotation][i].Y);
             if (_bufferedInput.Key is ConsoleKey.LeftArrow or ConsoleKey.RightArrow or ConsoleKey.DownArrow
-                    or ConsoleKey.Spacebar or ConsoleKey.UpArrow or ConsoleKey.Z or ConsoleKey.X or ConsoleKey.C || _timer >= 1)
-                Board[_occupiedBlocks[i].X, _occupiedBlocks[i].Y] = Blocks.Empty;
+                    or ConsoleKey.Spacebar or ConsoleKey.UpArrow or ConsoleKey.Z or ConsoleKey.X or ConsoleKey.C ||
+                _timer >= 1)
+                Board[_occupiedBlocks[i].X, _occupiedBlocks[i].Y] = Block.Empty;
         }
 
         if (_timer >= 1)
         {
             _timer = 0;
-            Down(true);
+            if (_groundedTimer >= 1)
+            {
+                Down(true);
+                _groundedTimer = 0;
+                _grounded = false;
+            }
+            else
+            {
+                Down();
+            }
+
+            for (int i = 0; i < 4; i++)
+            {
+                _occupiedBlocks[i] = (X: _position.X + BlockData[(int)_currentBlock][(int)_currentRotation][i].X,
+                    Y: _position.Y + BlockData[(int)_currentBlock][(int)_currentRotation][i].Y);
+                if (_bufferedInput.Key is ConsoleKey.LeftArrow or ConsoleKey.RightArrow or ConsoleKey.DownArrow
+                        or ConsoleKey.Spacebar or ConsoleKey.UpArrow or ConsoleKey.Z or ConsoleKey.X or ConsoleKey.C ||
+                    _timer >= 1)
+                    Board[_occupiedBlocks[i].X, _occupiedBlocks[i].Y] = Block.Empty;
+            }
         }
+
+        int yOffset = 0;
+        bool @continue = true;
+        while (@continue)
+        {
+            LoopOver((x, y) =>
+            {
+                y += yOffset; 
+                //if y isn't on the bottom of the board, it's over an empty block, and it's not over an occupied block, continue
+                if ((y != BoardHeight - 1 && Board[x, y + 1] is Block.Empty or Block.Ghost) || (_occupiedBlocks.Contains((x, y))))
+                    return true;
+                @continue = false;
+                yOffset--;
+                return false;
+            });
+            yOffset++;  
+        }
+        LoopOver((x, y) =>
+        {
+            Board[x, y + yOffset] = Block.Ghost;
+            return true;
+        });
+
 
         switch (_bufferedInput.Key)
         {
@@ -147,27 +208,20 @@ internal static partial class Program
                 bool success = true;
                 LoopOver((x, y) =>
                 {
-                    if (x != 0 && Board[x - 1, y] == Blocks.Empty)
+                    if (x != 0 && Board[x - 1, y] is Block.Empty or Block.Ghost)
                         return true;
                     success = false;
                     return false;
                 });
 
                 if (success)
-                {
-                    LoopOver((x, y) =>
-                    {
-                        Board[x - 1, y] = _currentBlock;
-                        return true;
-                    });
                     _position.X--;
-                }
-                else
-                    LoopOver((x, y) =>
-                    {
-                        Board[x, y] = _currentBlock;
-                        return true;
-                    });
+                LoopOver((x, y) =>
+                {
+                    Board[x, y] = _currentBlock;
+                    return true;
+                });
+
                 break;
             }
             case ConsoleKey.RightArrow:
@@ -175,27 +229,21 @@ internal static partial class Program
                 bool success = true;
                 LoopOver((x, y) =>
                 {
-                    if (x != BoardWidth - 1 && Board[x + 1, y] == Blocks.Empty)
+                    if (x != BoardWidth - 1 && Board[x + 1, y] is Block.Empty or Block.Ghost)
                         return true;
                     success = false;
                     return false;
                 });
 
                 if (success)
-                {
-                    LoopOver((x, y) =>
-                    {
-                        Board[x + 1, y] = _currentBlock;
-                        return true;
-                    });
                     _position.X++;
-                }
-                else
-                    LoopOver((x, y) =>
-                    {
-                        Board[x, y] = _currentBlock;
-                        return true;
-                    });
+                
+                LoopOver((x, y) =>
+                {
+                    Board[x, y] = _currentBlock;
+                    return true;
+                });
+
                 break;
             }
             case ConsoleKey.DownArrow:
@@ -214,7 +262,18 @@ internal static partial class Program
                 });
                 break;
             }
-            
+
+            case ConsoleKey.Z: // Rotate counterclockwise
+            {
+                _currentRotation = (Rotation)(((int)_currentRotation - 1) % 4);
+                LoopOver((x, y) =>
+                {
+                    Board[x, y] = _currentBlock;
+                    return true;
+                });
+                break;
+            }
+
             case ConsoleKey.Spacebar: // Hard drop
             {
                 bool success = true;
@@ -222,16 +281,16 @@ internal static partial class Program
                 {
                     LoopOver((x, y) =>
                     {
-                        if (y != BoardHeight - 1 && Board[x, y + 1] == Blocks.Empty)
+                        if (y != BoardHeight - 1 && Board[x, y + 1] is Block.Empty or Block.Ghost)
                             return true;
                         success = false;
                         _position.Y--;
                         return false;
                     });
                     _position.Y++;
-                    _score += 2;
+                    _score += (int)ScoreValue.HardDrop;
                 }
-            
+
                 if (success)
                 {
                     LoopOver((x, y) =>
@@ -251,50 +310,28 @@ internal static partial class Program
                     _timer = 0;
                     QueueNextBlock();
                 }
+
                 break;
             }
 
             case ConsoleKey.C:
             {
-                if (_heldBlock == Blocks.Empty)
+                if (_heldBlock == Block.Empty)
                 {
                     _heldBlock = _currentBlock;
                     QueueNextBlock();
                 }
                 else
                 {
-                    (Blocks, Blocks) temp = (_heldBlock, _currentBlock);
+                    (Block, Block) temp = (_heldBlock, _currentBlock);
                     _heldBlock = temp.Item2;
                     _currentBlock = temp.Item1;
                     _position = ResetPosition;
                     _currentRotation = Rotation.Up;
                 }
+
                 break;
             }
-        }
-
-        for (int y = 0; y < BoardHeight; y++)
-        {
-            bool full = true;
-            for (int x = 0; x < BoardWidth; x++)
-                if (Board[x, y] == Blocks.Empty)
-                {
-                    full = false;
-                    break;
-                }
-
-            if (!full)
-                continue;
-            
-            for (int x = 0; x < BoardWidth; x++)
-                Board[x, y] = Blocks.Empty;
-            
-            for (int i = y; i > 0; i--)
-            for (int x = 0; x < BoardWidth; x++)
-                Board[x, i] = Board[x, i - 1];
-            
-            _score += 100;
-            _level = _score / 1000 + 1;
         }
 
         void LoopOver(Func<int, int, bool> func)
@@ -314,12 +351,12 @@ internal static partial class Program
             bool success = true;
             LoopOver((x, y) =>
             {
-                if (y != BoardHeight - 1 && Board[x, y + 1] == Blocks.Empty)
+                if (y != BoardHeight - 1 && Board[x, y + 1] is Block.Empty or Block.Ghost)
                     return true;
                 success = false;
                 return false;
             });
-            
+
             if (success)
             {
                 LoopOver((x, y) =>
@@ -329,7 +366,7 @@ internal static partial class Program
                 });
                 _position.Y++;
                 if (grantPoints)
-                    _score++;
+                    _score += (int)ScoreValue.SoftDrop;
             }
             else
             {
@@ -338,9 +375,38 @@ internal static partial class Program
                     Board[x, y] = _currentBlock;
                     return true;
                 });
+                _grounded = true;
                 if (stopAtGround)
                 {
                     _timer = 0;
+                    int linesCleared = 0;
+                    for (int y = 0; y < BoardHeight; y++)
+                    {
+                        bool full = true;
+                        for (int x = 0; x < BoardWidth; x++)
+                            if (Board[x, y] is Block.Empty or Block.Ghost)
+                            {
+                                full = false;
+                                break;
+                            }
+
+                        if (!full)
+                            continue;
+
+                        for (int x = 0; x < BoardWidth; x++)
+                            Board[x, y] = Block.Empty;
+
+                        for (int i = y; i > 0; i--)
+                        for (int x = 0; x < BoardWidth; x++)
+                            Board[x, i] = Board[x, i - 1];
+
+                        linesCleared++;
+                        _linesCleared++;
+                    }
+
+                    if (linesCleared > 0)
+                        _score += (int)LineScores[linesCleared] * _level;
+                    _level = _linesCleared / 10 + 1;
                     QueueNextBlock();
                 }
             }
@@ -351,7 +417,7 @@ internal static partial class Program
     {
         if (NextBag.Count == 0)
         {
-            NextBag.AddRange(Enum.GetValues<Blocks>()[1..8]);
+            NextBag.AddRange(Enum.GetValues<Block>()[1..8]);
             NextBag.Shuffle();
         }
 

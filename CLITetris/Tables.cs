@@ -1,17 +1,22 @@
+// ReSharper disable UnusedMember.Local
+
+using System.Diagnostics.CodeAnalysis;
+
 namespace CLITetris;
 
 internal static partial class Program
 {
     private static readonly string[] BlockColors =
     {
-        "[37;47m  ", // Empty (White)
-        "[37;46;1m  ", // I - Light Blue
-        "[37;43;1m  ", // O - Yellow
-        "[37;45;1m  ", // T - Purple
-        "[37;42;1m  ", // S - Green
-        "[37;41;1m  ", // Z - Red
-        "[37;44;1m  ", // J - Blue
+        "[48;5;235m  ", // Empty - Dark Gray
+        "[48;5;75m  ", // I - Light Blue
+        "[48;5;226m  ", // O - Yellow
+        "[48;5;165m  ", // T - Purple
+        "[48;5;46m  ", // S - Green
+        "[48;5;196m  ", // Z - Red
+        "[48;5;21m  ", // J - Blue
         "[48;5;208m  ", // L - Orange
+        "[48;5;249m  ", // Ghost - Gray
     };
 
     private static readonly (int X, int Y)[][][] BlockData =
@@ -266,7 +271,7 @@ internal static partial class Program
         },
     };
 
-    private enum Blocks
+    private enum Block
     {
         Empty,
         I,
@@ -276,6 +281,7 @@ internal static partial class Program
         Z,
         J,
         L,
+        Ghost,
     }
     
     private enum Rotation
@@ -285,4 +291,37 @@ internal static partial class Program
         Down,
         Left,
     }
+
+    [SuppressMessage("ReSharper", "InconsistentNaming")]
+    [SuppressMessage("Design", "CA1069:Enums values should not be duplicated")]
+    private enum ScoreValue
+    {
+        Single = 100,
+        MiniTSpin = 100,
+        MiniTSpinSingle = 200,
+        Double = 300,
+        TSpin = 400,
+        MiniTSpinDouble = 400,
+        Triple = 500,
+        B2BMiniTSpinDouble = 600,
+        Tetris = 800,
+        TSpinSingle = 800,
+        B2BTSpinSingle = 1200,
+        B2BTetris = 1200,
+        TSpinDouble = 1200,
+        TSpinTriple = 1600,
+        B2BTSpinDouble = 1800,
+        B2BTSpinTriple = 2400,
+        Combo = 50,
+        SoftDrop = 1,
+        HardDrop = 2,
+    }
+    
+    private static readonly Dictionary<int, ScoreValue> LineScores = new()
+    {
+        {1, ScoreValue.Single},
+        {2, ScoreValue.Double},
+        {3, ScoreValue.Triple},
+        {4, ScoreValue.Tetris},
+    };
 }
