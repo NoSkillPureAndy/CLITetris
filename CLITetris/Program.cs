@@ -89,6 +89,7 @@ internal static partial class Program
                 _lagCounter = (int)s.ElapsedMilliseconds;
                 s.Reset();
                 _timer += (int)Math.Pow(_level, 3) / 2000d;
+                Thread.Sleep(Math.Max(0, 16 - _lagCounter)); // 62.5 fps
             }
 
             Console.SetCursorPosition(0, 0);
@@ -199,7 +200,7 @@ internal static partial class Program
             }
             case ConsoleKey.DownArrow:
             {
-                Down();
+                Down(false, true);
                 break;
             }
 
@@ -228,6 +229,7 @@ internal static partial class Program
                         return false;
                     });
                     _position.Y++;
+                    _score += 2;
                 }
             
                 if (success)
@@ -307,7 +309,7 @@ internal static partial class Program
             }
         }
 
-        void Down(bool stopAtGround = false)
+        void Down(bool stopAtGround = false, bool grantPoints = false)
         {
             bool success = true;
             LoopOver((x, y) =>
@@ -326,6 +328,8 @@ internal static partial class Program
                     return true;
                 });
                 _position.Y++;
+                if (grantPoints)
+                    _score++;
             }
             else
             {
